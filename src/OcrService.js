@@ -1,51 +1,58 @@
 import * as ort from 'onnxruntime-web';
 
-// 중요: PaddleOCR 사전(Dictionary) - 숫자와 슬래시(/) 위주로 구성
-// 실제 모델의 korean_dict와 순서가 맞아야 합니다.
-const CHARACTER_DICT = "0123456789/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ ".split("");
+let session = null;
+let charDict = [];
+let dict_path = '/en_dict.txt'; //public 폴더를 기준으로한 경로
+let ocr_path = '/card_rec_en.onnx';
+/**
+ * 사전 파일 및 모델 세션을 초기화합니다. (내부 호출용)
+ */
+const initService = async () => {
+    // 1. 사전 파일 로드 (이미 로드되었다면 스킵)
+    if (charDict.length === 0) {
+        const response = await fetch(dict_path); 
+        const text = await response.text();
+        
+        // 1. 기존 방식대로 사전 로드
+        const lines = text.split(/\n/).map(line => line.replace(/\r$/, ''));
+        charDict = ["blank", ...lines];
 
-export const runOcrInference = async (canvas) => {
-    try {
-        // 1. public 폴더의 모델 로드 (서버 상대 경로)
-        const session = await ort.InferenceSession.create('/models/card_rec.onnx', {
-            executionProviders: ['wasm'], 
+        // 2. 만약 사전에 슬래시가 없다면 강제로 추가
+        if (!charDict.includes("/")) {
+            charDict.push("/"); 
+            console.log("⚠️ 사전에 슬래시가 없어 수동으로 추가했습니다. (Index:", charDict.length - 1, ")");
+        }
+    }
+
+    // 2. ONNX 세션 생성
+    if (!session) {
+        session = await ort.InferenceSession.create(ocr_path, {
+            executionProviders: ['wasm'],
             graphOptimizationLevel: 'all'
         });
-
-        // 2. 캔버스 데이터를 텐서로 변환
-        const tensor = preprocess(canvas);
-
-        // 3. 모델 실행
-        const feeds = { [session.inputNames[0]]: tensor };
-        const results = await session.run(feeds);
-        const output = results[session.outputNames[0]];
-
-        // 4. 결과 디코딩
-        return decodeCTC(output.data, output.dims);
-    } catch (e) {
-        console.error("OCR 추론 중 오류 발생:", e);
-        return "인식 실패";
     }
 };
 
+/**
+ * 캔버스 이미지를 텐서로 변환 (전처리)
+ */
 const preprocess = (canvas) => {
     const ctx = canvas.getContext('2d');
     const imageData = ctx.getImageData(0, 0, 320, 48);
     const { data } = imageData;
-    const float32Data = new Float32Array(1 * 3 * 48 * 320);
-
-    // CHW(Channel, Height, Width) 순서 및 정규화
-    const offsetG = 48 * 320;
-    const offsetB = 48 * 320 * 2;
+    const float32Data = new Float32Array(3 * 48 * 320);
 
     for (let i = 0; i < 48 * 320; i++) {
-        float32Data[i] = (data[i * 4] / 255.0 - 0.5) / 0.5;           // R
-        float32Data[i + offsetG] = (data[i * 4 + 1] / 255.0 - 0.5) / 0.5; // G
-        float32Data[i + offsetB] = (data[i * 4 + 2] / 255.0 - 0.5) / 0.5; // B
+        float32Data[i] = (data[i * 4] / 255.0 - 0.5) / 0.5;
+        float32Data[i + 48 * 320] = (data[i * 4 + 1] / 255.0 - 0.5) / 0.5;
+        float32Data[i + 48 * 320 * 2] = (data[i * 4 + 2] / 255.0 - 0.5) / 0.5;
     }
     return new ort.Tensor('float32', float32Data, [1, 3, 48, 320]);
 };
 
+/**
+ * CTC 디코딩
+ */
 const decodeCTC = (data, dims) => {
     const steps = dims[1];
     const numChars = dims[2];
@@ -55,11 +62,30 @@ const decodeCTC = (data, dims) => {
     for (let i = 0; i < steps; i++) {
         const row = data.slice(i * numChars, (i + 1) * numChars);
         const maxIdx = row.indexOf(Math.max(...row));
-        // 0은 보통 Blank(CTC), 그 외 인덱스를 사전에서 매핑
         if (maxIdx > 0 && maxIdx !== prevIdx) {
-            text += CHARACTER_DICT[maxIdx - 1] || "";
+            text += charDict[maxIdx] || "";
         }
         prevIdx = maxIdx;
     }
     return text.trim();
+};
+
+/**
+ * 외부에서 호출할 유일한 함수
+ */
+export const runOcrInference = async (canvas) => {
+    try {
+        await initService(); // 준비 작업 수행
+
+        const tensor = preprocess(canvas);
+        const feeds = { [session.inputNames[0]]: tensor };
+        const results = await session.run(feeds);
+        const output = results[session.outputNames[0]];
+        
+
+        return decodeCTC(output.data, output.dims);
+    } catch (e) {
+        console.log("현재사용중인 모델언어:",ocr_path);
+        return "인식 실패";
+    }
 };
