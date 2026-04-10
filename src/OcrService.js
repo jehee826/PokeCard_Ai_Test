@@ -1,91 +1,152 @@
 import * as ort from 'onnxruntime-web';
 
-let session = null;
+let detSession = null;
+let recSession = null;
 let charDict = [];
-let dict_path = '/en_dict.txt'; //public 폴더를 기준으로한 경로
-let ocr_path = '/card_rec_en.onnx';
-/**
- * 사전 파일 및 모델 세션을 초기화합니다. (내부 호출용)
- */
-const initService = async () => {
-    // 1. 사전 파일 로드 (이미 로드되었다면 스킵)
+
+const DICT_PATH = '/en_dict.txt';
+const DET_MODEL_PATH = '/model.onnx';
+const REC_MODEL_PATH = '/card_rec_en.onnx';
+
+export const initService = async () => {
     if (charDict.length === 0) {
-        const response = await fetch(dict_path); 
+        const response = await fetch(DICT_PATH);
         const text = await response.text();
-        
-        // 1. 기존 방식대로 사전 로드
         const lines = text.split(/\n/).map(line => line.replace(/\r$/, ''));
         charDict = ["blank", ...lines];
-
-        // 2. 만약 사전에 슬래시가 없다면 강제로 추가
-        if (!charDict.includes("/")) {
-            charDict.push("/"); 
-            console.log("⚠️ 사전에 슬래시가 없어 수동으로 추가했습니다. (Index:", charDict.length - 1, ")");
-        }
     }
-
-    // 2. ONNX 세션 생성
-    if (!session) {
-        session = await ort.InferenceSession.create(ocr_path, {
+    if (!detSession) {
+        detSession = await ort.InferenceSession.create(DET_MODEL_PATH, { 
             executionProviders: ['wasm'],
-            graphOptimizationLevel: 'all'
+            graphOptimizationLevel: 'all' 
+        });
+    }
+    if (!recSession) {
+        recSession = await ort.InferenceSession.create(REC_MODEL_PATH, { 
+            executionProviders: ['wasm'],
+            graphOptimizationLevel: 'all' 
         });
     }
 };
 
 /**
- * 캔버스 이미지를 텐서로 변환 (전처리)
+ * 히트맵에서 임계값을 넘는 모든 영역의 박스 좌표 추출 (BFS 방식)
  */
-const preprocess = (canvas) => {
-    const ctx = canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, 320, 48);
-    const { data } = imageData;
-    const float32Data = new Float32Array(3 * 48 * 320);
+// OcrService.js 내의 findAllBoxes 함수 수정
+const findAllBoxes = (heatmap, width, height) => {
+    const boxes = [];
+    const threshold = 0.2; // 0.3에서 0.2로 낮춰서 더 민감하게 검출
+    const visited = new Uint8Array(640 * 640);
 
-    for (let i = 0; i < 48 * 320; i++) {
-        float32Data[i] = (data[i * 4] / 255.0 - 0.5) / 0.5;
-        float32Data[i + 48 * 320] = (data[i * 4 + 1] / 255.0 - 0.5) / 0.5;
-        float32Data[i + 48 * 320 * 2] = (data[i * 4 + 2] / 255.0 - 0.5) / 0.5;
+    for (let i = 0; i < 640 * 640; i++) {
+        if (heatmap[i] > threshold && !visited[i]) {
+            let minX = 640, maxX = 0, minY = 640, maxY = 0;
+            const stack = [i];
+            visited[i] = 1;
+
+            while (stack.length > 0) {
+                const curr = stack.pop();
+                const cx = curr % 640;
+                const cy = Math.floor(curr / 640);
+                minX = Math.min(minX, cx); maxX = Math.max(maxX, cx);
+                minY = Math.min(minY, cy); maxY = Math.max(maxY, cy);
+
+                for (let [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+                    const nx = cx + dx, ny = cy + dy;
+                    if (nx >= 0 && nx < 640 && ny >= 0 && ny < 640) {
+                        const nIdx = ny * 640 + nx;
+                        if (heatmap[nIdx] > threshold && !visited[nIdx]) {
+                            visited[nIdx] = 1;
+                            stack.push(nIdx);
+                        }
+                    }
+                }
+            }
+
+            // 노이즈 필터링 완화: 가로/세로 5픽셀 이상이면 인식 (기존 8에서 하향)
+            if ((maxX - minX) > 5 && (maxY - minY) > 5) {
+                boxes.push({
+                    x: (minX / 640) * width,
+                    y: (minY / 640) * height,
+                    w: ((maxX - minX) / 640) * width,
+                    h: ((maxY - minY) / 640) * height
+                });
+            }
+        }
     }
-    return new ort.Tensor('float32', float32Data, [1, 3, 48, 320]);
+    return boxes;
 };
 
 /**
- * CTC 디코딩
+ * 메인 추론 함수
  */
-const decodeCTC = (data, dims) => {
-    const steps = dims[1];
-    const numChars = dims[2];
-    let text = "";
-    let prevIdx = -1;
+export const runOcrInference = async (sourceCanvas) => {
+    try {
+        await initService();
 
+        // 1. Detection 전처리 (640x640 정규화)
+        const detCanvas = document.createElement('canvas');
+        detCanvas.width = 640; detCanvas.height = 640;
+        detCanvas.getContext('2d').drawImage(sourceCanvas, 0, 0, 640, 640);
+        const detData = detCanvas.getContext('2d').getImageData(0, 0, 640, 640).data;
+        
+        const detFloat32 = new Float32Array(3 * 640 * 640);
+        for (let i = 0; i < 640 * 640; i++) {
+            detFloat32[i] = (detData[i * 4] / 255.0 - 0.485) / 0.229;
+            detFloat32[i + 640*640] = (detData[i * 4 + 1] / 255.0 - 0.456) / 0.224;
+            detFloat32[i + 640*640*2] = (detData[i * 4 + 2] / 255.0 - 0.406) / 0.225;
+        }
+
+        // 2. Detection 추론
+        const detTensor = new ort.Tensor('float32', detFloat32, [1, 3, 640, 640]);
+        const detOut = await detSession.run({ [detSession.inputNames[0]]: detTensor });
+        const heatmap = detOut[detSession.outputNames[0]].data;
+
+        // 3. 박스 추출
+        const boxes = findAllBoxes(heatmap, sourceCanvas.width, sourceCanvas.height);
+        const results = [];
+
+        // 4. 각 박스별 Recognition 수행
+        for (const box of boxes) {
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = 320; cropCanvas.height = 48;
+            const cropCtx = cropCanvas.getContext('2d');
+            
+            // 박스 영역 Crop (여유 공간을 위해 약간 패딩을 줄 수도 있음)
+            cropCtx.drawImage(sourceCanvas, box.x, box.y, box.w, box.h, 0, 0, 320, 48);
+
+            const recData = cropCtx.getImageData(0, 0, 320, 48).data;
+            const recFloat32 = new Float32Array(3 * 48 * 320);
+            for (let i = 0; i < 48 * 320; i++) {
+                recFloat32[i] = (recData[i * 4] / 255.0 - 0.5) / 0.5;
+                recFloat32[i + 48*320] = (recData[i * 4 + 1] / 255.0 - 0.5) / 0.5;
+                recFloat32[i + 48*320*2] = (recData[i * 4 + 2] / 255.0 - 0.5) / 0.5;
+            }
+
+            const recTensor = new ort.Tensor('float32', recFloat32, [1, 3, 48, 320]);
+            const recOut = await recSession.run({ [recSession.inputNames[0]]: recTensor });
+            
+            const text = decodeCTC(recOut[recSession.outputNames[0]].data, recOut[recSession.outputNames[0]].dims);
+            if (text.length > 0) {
+                results.push({ text, box });
+            }
+        }
+
+        return results; // [{text, box}, ...] 형식 반환
+    } catch (e) {
+        console.error("Inference Error:", e);
+        return [];
+    }
+};
+
+const decodeCTC = (data, dims) => {
+    const steps = dims[1], numChars = dims[2];
+    let text = "", prevIdx = -1;
     for (let i = 0; i < steps; i++) {
         const row = data.slice(i * numChars, (i + 1) * numChars);
         const maxIdx = row.indexOf(Math.max(...row));
-        if (maxIdx > 0 && maxIdx !== prevIdx) {
-            text += charDict[maxIdx] || "";
-        }
+        if (maxIdx > 0 && maxIdx !== prevIdx) text += charDict[maxIdx] || "";
         prevIdx = maxIdx;
     }
     return text.trim();
-};
-
-/**
- * 외부에서 호출할 유일한 함수
- */
-export const runOcrInference = async (canvas) => {
-    try {
-        await initService(); // 준비 작업 수행
-
-        const tensor = preprocess(canvas);
-        const feeds = { [session.inputNames[0]]: tensor };
-        const results = await session.run(feeds);
-        const output = results[session.outputNames[0]];
-        
-
-        return decodeCTC(output.data, output.dims);
-    } catch (e) {
-        console.log("현재사용중인 모델언어:",ocr_path);
-        return "인식 실패";
-    }
 };
