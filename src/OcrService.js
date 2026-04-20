@@ -31,7 +31,7 @@ export const initService = async () => {
 
 const findAllBoxes = (heatmap, width, height) => {
     const boxes = [];
-    const threshold = 0.2; 
+    const threshold = 0.2; //20퍼센트가 넘어가면 박스로 확정하고 박스침
     const visited = new Uint8Array(640 * 640);
     
     // --- 설정 변수 ---
