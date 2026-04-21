@@ -1,184 +1,140 @@
-.counter {
-  font-size: 16px;
-  padding: 5px 10px;
-  border-radius: 5px;
-  color: var(--accent);
-  background: var(--accent-bg);
-  border: 2px solid transparent;
-  transition: border-color 0.3s;
-  margin-bottom: 24px;
-
-  &:hover {
-    border-color: var(--accent-border);
-  }
-  &:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-}
-
-.hero {
-  position: relative;
-
-  .base,
-  .framework,
-  .vite {
-    inset-inline: 0;
-    margin: 0 auto;
-  }
-
-  .base {
-    width: 170px;
-    position: relative;
-    z-index: 0;
-  }
-
-  .framework,
-  .vite {
-    position: absolute;
-  }
-
-  .framework {
-    z-index: 1;
-    top: 34px;
-    height: 28px;
-    transform: perspective(2000px) rotateZ(300deg) rotateX(44deg) rotateY(39deg)
-      scale(1.4);
-  }
-
-  .vite {
-    z-index: 0;
-    top: 107px;
-    height: 26px;
-    width: auto;
-    transform: perspective(2000px) rotateZ(300deg) rotateX(40deg) rotateY(39deg)
-      scale(0.8);
-  }
-}
-
-#center {
+/* 도감 전체 컨테이너 */
+.pokedex-container {
+  width: 95%;            /* 너비를 80%에서 95%로 늘려 여백 최소화 */
+  max-width: 500px;
+  height: auto;          /* 고정 높이 1800px 삭제 -> 내용물에 맞게 자동 조절 */
+  min-height: 100vh;     /* 대신 최소 높이를 화면 전체 높이로 설정 */
+  margin: 10px auto;
+  padding-bottom: 30px;  /* 하단 여백 추가 */
+  background-color: #e3350d;
+  border: 8px solid #a12208; /* 테두리 살짝 축소 */
+  border-radius: 25px;
+  overflow-y: auto;      /* 세로 스크롤 허용 */
   display: flex;
   flex-direction: column;
-  gap: 25px;
-  place-content: center;
-  place-items: center;
-  flex-grow: 1;
-
-  @media (max-width: 1024px) {
-    padding: 32px 20px 24px;
-    gap: 18px;
-  }
+  align-items: center;
 }
 
-#next-steps {
+/* 도감 상단 대형 파란 램프 */
+.pokedex-container::before {
+  content: "";
+  position: absolute;
+  top: 15px;
+  left: 35px;
+  width: 30px;
+  height: 30px;
+  background: radial-gradient(circle, #51adff 20%, #005691 100%);
+  border: 6px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 25px #51adff;
+  z-index: 20;
+}
+
+/* 왼쪽 패널: 카메라 디스플레이 영역 */
+.left-panel {
+  background-color: #2a2a2a;
+  width: 90%;            /* 고정 대신 비율로 변경 */
+  height: auto;          /* 높이 자동 */
+  margin: 70px auto 20px auto;
+  padding: 15px 0 30px 0; /* 내부 여백 추가 */
+  border: 5px solid #555;
+  border-radius: 15px;
   display: flex;
-  border-top: 1px solid var(--border);
-  text-align: left;
-
-  & > div {
-    flex: 1 1 0;
-    padding: 32px;
-    @media (max-width: 1024px) {
-      padding: 24px 20px;
-    }
-  }
-
-  .icon {
-    margin-bottom: 16px;
-    width: 22px;
-    height: 22px;
-  }
-
-  @media (max-width: 1024px) {
-    flex-direction: column;
-    text-align: center;
-  }
+  flex-direction: column;
+  align-items: center;
 }
 
-#docs {
-  border-right: 1px solid var(--border);
-
-  @media (max-width: 1024px) {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-}
-
-#next-steps ul {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  gap: 8px;
-  margin: 32px 0 0;
-
-  .logo {
-    height: 18px;
-  }
-
-  a {
-    color: var(--text-h);
-    font-size: 16px;
-    border-radius: 6px;
-    background: var(--social-bg);
-    display: flex;
-    padding: 6px 12px;
-    align-items: center;
-    gap: 8px;
-    text-decoration: none;
-    transition: box-shadow 0.3s;
-
-    &:hover {
-      box-shadow: var(--shadow);
-    }
-    .button-icon {
-      height: 18px;
-      width: 18px;
-    }
-  }
-
-  @media (max-width: 1024px) {
-    margin-top: 20px;
-    flex-wrap: wrap;
-    justify-content: center;
-
-    li {
-      flex: 1 1 calc(50% - 8px);
-    }
-
-    a {
-      width: 100%;
-      justify-content: center;
-      box-sizing: border-box;
-    }
-  }
-}
-
-#spacer {
-  height: 88px;
-  border-top: 1px solid var(--border);
-  @media (max-width: 1024px) {
-    height: 48px;
-  }
-}
-
-.ticks {
+/* 실제 카메라 영상 스크린 */
+.screen {
+  width: 90%;            /* 400px 고정 대신 90%로 변경 (옆잘림 방지) */
+  aspect-ratio: 400 / 558; /* 원래 의도한 비율 유지 */
+  height: auto;          /* 높이는 비율에 맞춰 자동 계산 */
+  background-color: #1a1a1a;
+  border: 4px solid #333;
+  margin: 20px auto;
+  border-radius: 10px;
   position: relative;
+}
+
+/* 스캔 라인 애니메이션 */
+.scan-line {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
+  height: 4px;
+  background: rgba(81, 173, 255, 0.6);
+  box-shadow: 0 0 15px #51adff;
+  z-index: 10;
+  animation: scanning 2.5s linear infinite;
+}
 
-  &::before,
-  &::after {
-    content: '';
-    position: absolute;
-    top: -4.5px;
-    border: 5px solid transparent;
-  }
+@keyframes scanning {
+  0% { top: 0; }
+  100% { top: 100%; }
+}
 
-  &::before {
-    left: 0;
-    border-left-color: var(--border);
-  }
-  &::after {
-    right: 0;
-    border-right-color: var(--border);
-  }
+/* LED 표시등 */
+.status-leds {
+  position: absolute;
+  top: 15px;
+  right: 30px;
+  display: flex;
+  gap: 10px;
+}
+
+.led {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #000;
+}
+.led-red { background-color: #ff3e3e; box-shadow: 0 0 5px #ff3e3e; }
+.led-blink { animation: led-blink 1s step-end infinite; }
+
+@keyframes led-blink { 50% { opacity: 0.3; } }
+
+/* 하단 장식 요소 */
+.panel-deco {
+  position: absolute;
+  bottom: 15px;
+  width: 90%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.d-pad { width: 50px; height: 50px; position: relative; }
+.d-btn { position: absolute; background-color: #333; border: 1px solid #111; }
+.up { width: 15px; height: 15px; left: 17px; top: 0; }
+.down { width: 15px; height: 15px; left: 17px; bottom: 0; }
+.left { width: 15px; height: 15px; top: 17px; left: 0; }
+.right { width: 15px; height: 15px; top: 17px; right: 0; }
+
+.round-btns { display: flex; gap: 8px; }
+.r-btn { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #111; }
+.btn-blue { background-color: #2c5ba7; }
+.btn-yellow { background-color: #eecf1a; }
+
+/* 오른쪽 섹션: 분석 결과창 */
+.right-section {
+  width: 90%;            /* 80%에서 90%로 확장 */
+  padding: 20px;         /* 패딩 축소 */
+  background-color: #333;
+  margin: 10px auto;
+  border-radius: 10px;
+  box-shadow: inset 0 0 30px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.result-title {
+  font-size: 1.5rem;    /* 모바일에 맞춰 글자 크기 축소 */
+  text-align: center;
+}
+.capture-preview {
+  width: 100%;          /* 부모 너비에 맞춤 */
+  max-width: 250px;
+  height: auto;
 }
